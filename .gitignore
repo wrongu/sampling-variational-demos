@@ -1,0 +1,5 @@
+*.DS_Store
+*.csv
+*stats.txt
+*.hpp
+figures/
