@@ -2,16 +2,24 @@
 
 ROOT=`pwd`
 
-example="banana"
-LAMBDAS=(1.01 1.1 1.3 1.5 2.0 4.0 8.0 16.0 32.0 64.0)
-SAMPLER_ARGS="num_chains=4 num_warmup=1000 num_samples=10000"
-ISVI_ARGS="num_warmup=1000 num_samples=10000 num_kl_samples=10 adapt delta=0.8"
+PROBLEM="$1"
+LAMBDAS=($(python3 -c "import numpy; print(*map(lambda x: f'{x:.3f}', numpy.logspace(0,1,21)))"))
+SAMPLER_ARGS="num_warmup=1000 num_samples=10000"
+ISVI_ARGS="num_warmup=1000 stochastic_kl=1 num_samples=10000 num_kl_samples=50 adapt delta=0.8"
 CMDSTAN="/Users/richard/Research/libraries/cmdstan"
 REFRESH=500
+CHAINS=(1 2 3 4)
 
-cd $ROOT/$example
+if [ ! -f $ROOT/$PROBLEM/$PROBLEM ]; then
+    echo "$PROBLEM/$PROBLEM does not exist - maybe needs to be compiled?"
+    exit 1
+fi
 
-rm *.csv *stats.txt
+cd $ROOT/$PROBLEM
+
+if [ -f nuts_1.csv ]; then
+    rm *.csv *stats.txt
+fi
 
 if [ -f data.json ]; then
     DATA_ARG="data file=data.json"
@@ -19,40 +27,23 @@ else
     DATA_ARG=""
 fi
 
-echo "ENTERED $(pwd)"
-# RUN DEFAULT SAMPLING
-echo "./$example sample $SAMPLER_ARGS $DATA_ARG output file=nuts.csv refresh=${REFRESH}"
-./$example sample $SAMPLER_ARGS $DATA_ARG output file=nuts.csv refresh=${REFRESH}
+for c in ${CHAINS[@]}; do
+    # RUN NUTS
+    ./$PROBLEM sample $SAMPLER_ARGS $DATA_ARG output file=nuts_${c}.csv refresh=${REFRESH}
 
+    # RUN ADVI
+    ./$PROBLEM variational $DATA_ARG output file=advi_${c}.csv
+done
+
+# Summaryize stats for NUTS across all chains
 $CMDSTAN/bin/stansummary nuts*.csv > nuts_stats.txt
 
-# RUN DEFAULT ADVI
-echo "./$example variational $DATA_ARG output file=advi.csv"
-./$example variational $DATA_ARG output file=advi.csv
-
-# RUN OURS
-for l in ${LAMBDAS[@]}; do
-    echo "./$example isvi lambda=${l} $ISVI_ARGS $DATA_ARG output file=isvi_${l}_1.csv refresh=${REFRESH}"
-    ./$example isvi lambda=${l} $ISVI_ARGS $DATA_ARG output file=isvi_${l}_1.csv refresh=${REFRESH}
-
-    echo "./$example isvi lambda=${l} $ISVI_ARGS $DATA_ARG output file=isvi_${l}_2.csv refresh=${REFRESH}"
-    ./$example isvi lambda=${l} $ISVI_ARGS $DATA_ARG output file=isvi_${l}_2.csv refresh=${REFRESH}
-
-    echo "./$example isvi lambda=${l} $ISVI_ARGS $DATA_ARG output file=isvi_${l}_3.csv refresh=${REFRESH}"
-    ./$example isvi lambda=${l} $ISVI_ARGS $DATA_ARG output file=isvi_${l}_3.csv refresh=${REFRESH}
-
-    echo "./$example isvi lambda=${l} $ISVI_ARGS $DATA_ARG output file=isvi_${l}_4.csv refresh=${REFRESH}"
-    ./$example isvi lambda=${l} $ISVI_ARGS $DATA_ARG output file=isvi_${l}_4.csv refresh=${REFRESH}
-
-    $CMDSTAN/bin/stansummary isvi_${l}_1.csv isvi_${l}_2.csv isvi_${l}_3.csv isvi_${l}_4.csv > isvi_${l}_stats.txt
-done
-cd $ROOT
-
-# PLOTTING
-mkdir figures
+# RUN OURS (ISVI), FOR EACH VALUE OF LAMBDA
 for l in ${LAMBDAS[@]}; do
     for c in ${CHAINS[@]}; do
-        python plot_results.py --problem=$example --lam=$l --chain=$c
+        ./$PROBLEM isvi lambda=${l} $ISVI_ARGS $DATA_ARG output file=isvi_${l}_${c}.csv refresh=${REFRESH}
     done
-done
 
+    # Summaryize stats for ISVI across all chains
+    $CMDSTAN/bin/stansummary isvi_${l}_*.csv > isvi_${l}_stats.txt
+done
