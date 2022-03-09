@@ -3,6 +3,7 @@ import numpy as np
 import pandas as pd
 import stan
 import json
+from stan_helpers import unconstrained_dim, unconstrain_sample
 from pathlib import Path
 from tqdm.auto import trange
 from random_f import LazyMixtureOfSinusoids
@@ -26,19 +27,20 @@ parser.add_argument('--T', default=10, type=int)
 args = parser.parse_args()
 
 
-def load_nuts_results(problem, run=1):
-    return pd.read_csv(args.root_dir / problem / f'nuts_{run}.csv', comment='#')
+def load_nuts_results(mdl: stan.model.Model, problem: str, run:int = 1) -> np.ndarray:
+    df = pd.read_csv(args.root_dir / problem / f'nuts_{run}.csv', comment='#')
+    return unconstrain_sample(mdl, df[list(mdl.constrained_param_names)].to_numpy())
 
 
-def load_isvi_results(problem, lam, run=1):
+def load_isvi_results(problem, lam, run=1) -> pd.DataFrame:
     return pd.read_csv(args.root_dir / problem / f'isvi_{lam}_{run}.csv', comment='#')
 
 
-def load_advi_results(problem, run=1):
-    output = pd.read_csv(args.root_dir / problem / f'advi_{run}.csv', comment='#')
-    cols = [col for col in output.columns if '__' not in col]
-    m = output.iloc[0][cols].to_numpy()
-    c = np.einsum('ia,ib->ab', output.iloc[1:, :][cols]-m, output.iloc[1:, :][cols]-m)/(len(output)-1)
+def load_advi_results(mdl: stan.model.Model, problem: str, run: int = 1) -> dict:
+    df = pd.read_csv(args.root_dir / problem / f'advi_{run}.csv', comment='#')
+    unconstrained_vals = unconstrain_sample(mdl, df[list(mdl.constrained_param_names)].to_numpy())
+    m = unconstrained_vals[0]
+    c = np.einsum('ia,ib->ab', unconstrained_vals[1:]-m, unconstrained_vals[1:]-m)/(len(df)-1)
     return {'mean': m, 'cov': c}
 
 
@@ -54,49 +56,53 @@ def load_stan_model(problem):
         return stan.build(f.read(), data=data_arg)
 
 
-def isvi_mu_cov(lam, num):
-    dim = len(stan_model.param_names)
-    mean_cols = ['mu_' + c for c in stan_model.param_names]
-    omega_cols = ['omega_' + c for c in stan_model.param_names]
-    mus = isvi_samples[lam][mean_cols].iloc[:num].to_numpy().T
-    omegas = isvi_samples[lam][omega_cols].iloc[:num].to_numpy()
+def isvi_mu_cov(isvi_df, num):
+    mean_cols = [c for c in isvi_df.columns if c.startswith('mu_')]
+    omega_cols = [c for c in isvi_df.columns if c.startswith('omega_')]
+    assert len(mean_cols) == len(omega_cols), "Expected #mean = #omega (diagonal cov)!"
+    mus = isvi_df[mean_cols].iloc[:num].to_numpy().T
+    omegas = isvi_df[omega_cols].iloc[:num].to_numpy()
     covariances = np.stack([np.diag(np.exp(2*om)) for om in omegas], axis=-1)
     return mus, covariances
 
 
 def advi_mu_cov(run):
-    return advi_fits[run]['mean'][:,None], advi_fits[run]['cov'][:,:,None]
+    return advi_fits[run]['mean'][:, None], advi_fits[run]['cov'][:, :, None]
 
 
 runs = tuple(range(1, 1+args.num_runs))
 lambdas = [l.strip() for l in args.lambdas.split(',')]
 
 stan_model = load_stan_model(args.problem)
-print("Loaded", args.problem, "with unconstrained parameters:", *stan_model.param_names)
+print("Loaded", args.problem, "with (constrained) parameters:", *stan_model.constrained_param_names)
 
+print("Loading and unconstraining ADVI results...", end=" ")
+advi_fits = [load_advi_results(stan_model, args.problem, r) for r in runs]
+print("done.")
 
-advi_fits = [load_advi_results(args.problem, r) for r in runs]
-nuts_samples = pd.concat([load_nuts_results(args.problem, r) for r in runs])
-isvi_samples = {
+print("Loading and unconstraining NUTS results...", end=" ")
+nuts_samples = np.concatenate([load_nuts_results(stan_model, args.problem, r) for r in runs], axis=0)
+print("done.")
+
+print("Loading ISVI results...", end=" ")
+isvi_dict = {
     l: pd.concat([load_isvi_results(args.problem, l, r) for r in runs])
     for l in lambdas
 }
+print("done.")
 
-# Shuffle samples using DataFrame.shuffle(frac=1) to destroy autocorrelations
-nuts_samples = nuts_samples.sample(frac=1)
-isvi_samples = {l: s.sample(frac=1) for l, s in isvi_samples.items()}
-
+# Shuffle samples to destroy autocorrelations
+nuts_samples = nuts_samples[np.random.permutation(len(nuts_samples))]
+isvi_dict = {l: df.sample(frac=1.) for l, df in isvi_dict.items()}
 
 # dimensionality of the unconstrained space
-dim = len(stan_model.param_names)
+dim = unconstrained_dim(stan_model)
 # frequencies of sinusoids, in units of cycles-per-x where x is the units of the unconstrained parameter space
 freqs = np.arange(args.freq_min, args.freq_max+1).astype('float32')
 # Which alphas to experiment with
 alphas = np.linspace(args.alpha_min, args.alpha_max, args.num_alpha)
 
-
 # COMPUTE BIAS AND VARIANCE ON GRID
-
 
 true_ev = np.zeros((args.num_fs, len(alphas)))
 nuts_ev = np.zeros((args.num_fs, len(alphas), args.num_subs))
@@ -105,11 +111,11 @@ isvi_ev = np.zeros((args.num_fs, len(alphas), args.num_subs, len(lambdas)))
 t_history = np.zeros((args.num_fs, len(freqs), dim))
 phase_history = np.zeros((args.num_fs, len(freqs)))
 
-x_true = nuts_samples[list(stan_model.param_names)].to_numpy()[:args.num_true, :].T
-x_nuts = nuts_samples[list(stan_model.param_names)].to_numpy()[args.num_true:args.num_true+args.num_subs*args.T, :].T
+x_true = nuts_samples[:args.num_true, :].T
+x_nuts = nuts_samples[args.num_true:args.num_true+args.num_subs*args.T, :].T
 
-mu_isvi = [isvi_mu_cov(l, args.num_subs*args.T)[0] for l in lambdas]
-cov_isvi = [isvi_mu_cov(l, args.num_subs*args.T)[1] for l in lambdas]
+mu_isvi = [isvi_mu_cov(df, args.num_subs*args.T)[0] for l, df in isvi_dict.items()]
+cov_isvi = [isvi_mu_cov(df, args.num_subs*args.T)[1] for l, df in isvi_dict.items()]
 
 mu_advi = [advi_mu_cov(r)[0] for r in range(len(runs))]
 cov_advi = [advi_mu_cov(r)[1] for r in range(len(runs))]
@@ -124,7 +130,7 @@ f_nuts = LazyMixtureOfSinusoids(dim, freqs)
 f_advi = [LazyMixtureOfSinusoids(dim, freqs) for _ in mu_advi]
 f_isvi = [LazyMixtureOfSinusoids(dim, freqs) for _ in mu_isvi]
 
-progbar = trange(num_fs)
+progbar = trange(args.num_fs)
 for i in progbar:
     # New random f by drawing new directions 't' and new random phases
     phases = np.random.rand(freqs.size)*2*np.pi
