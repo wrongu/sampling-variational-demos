@@ -3,14 +3,20 @@
 *stats.txt
 *.hpp
 figures/
+.idea
+*__pycache__
+*.ipynb_checkpoints
+notebooks/build
 
 # Ignore outputs
 *stats.txt
 *.csv
 
-# Ignore images
+# Ignore images and animations
 *.gif
 *.svg
+*.pdf
+*.mp4
 
 # Ignore binaries of compiled models
 arK/arK
