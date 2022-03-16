@@ -10,9 +10,14 @@ def constrained_dim(mdl: stan.model.Model) -> int:
 
 def unconstrained_dim(mdl: stan.model.Model) -> int:
     cdim = constrained_dim(mdl)
-    dummy_x = np.zeros(cdim)
-    dummy_r = unflatten_constrained_params(mdl, dummy_x)
-    return sum([1 if np.isscalar(r) else len(r) for r in dummy_r.values()])
+    for _ in range(10):
+        dummy_x = np.random.rand(cdim)
+        try:
+            dummy_r = unconstrain_sample(mdl, dummy_x)
+            return dummy_r.size
+        except ValueError as e:
+            pass
+    raise e
 
 
 def unflatten_constrained_params(mdl: stan.model.Model, x: np.ndarray) -> dict:
@@ -41,10 +46,6 @@ def unflatten_constrained_params(mdl: stan.model.Model, x: np.ndarray) -> dict:
 def unconstrain_sample(mdl: stan.model.Model, x: np.ndarray) -> np.ndarray:
     if x.ndim == 1:
         x = x[None, :]
-        batch_size = tuple()
-    else:
-        batch_size = x.shape[:1]
-    out_size = batch_size + (unconstrained_dim(mdl),)
 
     if len(mdl.constrained_param_names) != x.shape[1]:
         raise ValueError(f'Only {x.shape[1]} values in x but require {len(mdl.constrained_param_names)} constrained params!')

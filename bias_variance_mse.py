@@ -79,6 +79,7 @@ lambdas = [l.strip() for l in args.lambdas.split(',')]
 
 stan_model = load_stan_model(args.problem)
 print("Loaded", args.problem, "with (constrained) parameters:", *stan_model.constrained_param_names)
+print("Dim of unconstrained space:", unconstrained_dim(stan_model))
 
 print("Loading and unconstraining ADVI results...", end=" ")
 advi_fits = [load_advi_results(stan_model, args.problem, r) for r in runs]
