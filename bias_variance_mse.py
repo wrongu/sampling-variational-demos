@@ -6,7 +6,7 @@ import json
 from stan_helpers import unconstrained_dim, unconstrain_sample
 from pathlib import Path
 from tqdm.auto import trange
-from random_f import LazyMixtureOfSinusoids
+from random_f import LazyMixtureOfSinusoids, power_law
 import argparse
 
 
@@ -20,6 +20,7 @@ parser.add_argument('--freq-max', default=300, type=int)
 parser.add_argument('--alpha-min', default=-3, type=int)
 parser.add_argument('--alpha-max', default=0, type=int)
 parser.add_argument('--num-alpha', default=50, type=int)
+parser.add_argument('--power-law-norm', default='max', type=str, choices=['max', 'mean', 'none'])
 parser.add_argument('--num-fs', default=200, type=int)
 parser.add_argument('--num-true', default=10000, type=int)
 parser.add_argument('--num-subs', default=1000, type=int)
@@ -121,10 +122,6 @@ mu_advi = [advi_mu_cov(r)[0] for r in range(len(runs))]
 cov_advi = [advi_mu_cov(r)[1] for r in range(len(runs))]
 
 
-def weights(a):
-    return (freqs ** a) / (freqs[0] ** a)
-
-
 f_true = LazyMixtureOfSinusoids(dim, freqs)
 f_nuts = LazyMixtureOfSinusoids(dim, freqs)
 f_advi = [LazyMixtureOfSinusoids(dim, freqs) for _ in mu_advi]
@@ -148,12 +145,12 @@ for i in progbar:
     
     # Given the precomputed tables above, quickly collate E[f] values for a variety of power-law-decay values
     for j, a in enumerate(alphas):
-        true_ev[i, j] = np.mean(f_true.apply(weights(a), phases))
-        nuts_ev[i, j, :] = np.mean(np.reshape(f_nuts.apply(weights(a), phases), (args.num_subs, args.T)), axis=1)
+        true_ev[i, j] = np.mean(f_true.apply(power_law(freqs, a, args.power_law_norm), phases))
+        nuts_ev[i, j, :] = np.mean(np.reshape(f_nuts.apply(power_law(freqs, a, args.power_law_norm), phases), (args.num_subs, args.T)), axis=1)
         for k, f in enumerate(f_advi):
-            advi_ev[i, j, k] = f.apply(weights(a), phases)
+            advi_ev[i, j, k] = f.apply(power_law(freqs, a, args.power_law_norm), phases)
         for k, f in enumerate(f_isvi):
-            isvi_ev[i, j, :, k] = np.mean(np.reshape(f.apply(weights(a), phases), (args.num_subs, args.T)), axis=1)
+            isvi_ev[i, j, :, k] = np.mean(np.reshape(f.apply(power_law(freqs, a, args.power_law_norm), phases), (args.num_subs, args.T)), axis=1)
 
 
 output_file = args.root_dir / args.problem / 'bias_variance_mse.dat'

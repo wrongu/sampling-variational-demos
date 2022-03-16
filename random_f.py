@@ -1,17 +1,27 @@
+from typing import Union
 import numpy as np
 
 
+def power_law(freqs: np.ndarray, alpha: float, normalize: Union[None, str] = 'max') -> np.ndarray:
+    if normalize is None or normalize.lower() == 'none':
+        return (freqs ** alpha)
+    elif normalize.lower() == 'max':
+        return (freqs ** alpha) / (freqs[0] ** alpha)
+    elif normalize.lower() == 'mean':
+        return (freqs ** alpha) / np.sum(freqs[0] ** alpha)
+
+
 class RandomMixtureOfSinusoids(object):
-    def __init__(self, dim, freqs, alpha):
+    def __init__(self, dim, freqs, alpha, norm='max'):
         self._dim = dim
         self._omega = np.array(freqs)
-        self._alpha = alpha
-        self._weights = self._omega ** alpha
+        self._norm = norm
+        self.set_alpha(alpha)
         self.randomize()
     
     def set_alpha(self, a):
         self._alpha = a
-        self._weights = self._omega ** a
+        self._weights = power_law(self._omega, a, self._norm)
     
     def randomize(self):
         self._phases = np.random.rand(len(self._omega)) * 2 * np.pi
@@ -28,8 +38,6 @@ class RandomMixtureOfSinusoids(object):
     def gauss_expectation(self, mean, cov, total=True):
         dot_tmu = self._t @ mean
         tCt = np.sum(self._t * (self._t @ cov), axis=1)
-        if np.min(tCt) < 0.:
-            print("WTF1")
         sin_part = np.sin(dot_tmu*self._omega + self._phases)
         exp_part = np.exp(-0.5 * tCt * self._omega**2)
         if total:
