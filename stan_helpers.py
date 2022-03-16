@@ -3,9 +3,16 @@ import stan
 from math import prod
 
 
-def unconstrained_dim(mdl: stan.model.Model):
+def constrained_dim(mdl: stan.model.Model) -> int:
     # Note: scalars have empty dimension, but prod([]) is 1
     return sum(map(prod, mdl.dims))
+
+
+def unconstrained_dim(mdl: stan.model.Model) -> int:
+    cdim = constrained_dim(mdl)
+    dummy_x = np.zeros(cdim)
+    dummy_r = unflatten_constrained_params(mdl, dummy_x)
+    return sum([1 if np.isscalar(r) else len(r) for r in dummy_r.values()])
 
 
 def unflatten_constrained_params(mdl: stan.model.Model, x: np.ndarray) -> dict:
