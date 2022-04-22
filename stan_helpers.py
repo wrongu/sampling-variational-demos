@@ -1,11 +1,25 @@
 import numpy as np
 import stan
 from math import prod
+import pandas as pd
+from io import StringIO
 
 
-def unconstrained_dim(mdl: stan.model.Model):
+def constrained_dim(mdl: stan.model.Model) -> int:
     # Note: scalars have empty dimension, but prod([]) is 1
     return sum(map(prod, mdl.dims))
+
+
+def unconstrained_dim(mdl: stan.model.Model) -> int:
+    cdim = constrained_dim(mdl)
+    for _ in range(10):
+        dummy_x = np.random.rand(cdim)
+        try:
+            dummy_r = unconstrain_sample(mdl, dummy_x)
+            return dummy_r.size
+        except (ValueError, RuntimeError) as e:
+            pass
+    raise e
 
 
 def unflatten_constrained_params(mdl: stan.model.Model, x: np.ndarray) -> dict:
@@ -34,10 +48,6 @@ def unflatten_constrained_params(mdl: stan.model.Model, x: np.ndarray) -> dict:
 def unconstrain_sample(mdl: stan.model.Model, x: np.ndarray) -> np.ndarray:
     if x.ndim == 1:
         x = x[None, :]
-        batch_size = tuple()
-    else:
-        batch_size = x.shape[:1]
-    out_size = batch_size + (unconstrained_dim(mdl),)
 
     if len(mdl.constrained_param_names) != x.shape[1]:
         raise ValueError(f'Only {x.shape[1]} values in x but require {len(mdl.constrained_param_names)} constrained params!')
@@ -46,3 +56,23 @@ def unconstrain_sample(mdl: stan.model.Model, x: np.ndarray) -> np.ndarray:
         mdl.unconstrain_pars(unflatten_constrained_params(mdl, s))
         for s in x
     ], axis=0)
+
+
+def read_summary(summary_file):
+    with open(summary_file, 'r') as f:
+        lines = f.readlines()
+    # Drop blank lines
+    lines = [l.rstrip() for l in lines if len(l.strip()) > 0]
+    # Find index of header row
+    idx_header = np.where([l.endswith('R_hat') for l in lines])[0][0]
+    # Find index of first non-data row
+    idx_footer = np.where([l.startswith('Samples') for l in lines])[0][0]
+    # Keep only the lines specifying the table of data
+    lines = lines[idx_header:idx_footer]
+    # (Temporary?) further drop metadata – rows whose names end with '__'
+    lines = [l for l in lines if not l.lstrip().split(' ')[0].endswith('__')]
+    # Construct 'CSV', but really space-separated string
+    table = "\n".join(lines)
+    # Replace instances like "-0.5-0.2" with spaces, "-0.5 -0.2", but not things like " 1e-2"
+    table = table.replace("-", " -").replace("e -", "e-")
+    return pd.read_csv(StringIO(table), sep='\s+')
