@@ -25,13 +25,19 @@ fi
 
 for c in ${CHAINS[@]}; do
     # RUN NUTS
-    if [ ! -f nuts_${c}.csv ]; then
+    if [ ! -e nuts_${c}.csv ]; then
+        echo "Running nuts_${c}.csv"
         ./$PROBLEM sample $SAMPLER_ARGS $DATA_ARG output file=nuts_${c}.csv refresh=${REFRESH}
+    else
+        echo "Skipping nuts_${c}.csv"
     fi
 
     # RUN ADVI
-    if [ ! -f advi_${c}.csv ]; then
-        ./$PROBLEM variational $DATA_ARG output file=advi_${c}.csv
+    if [ ! -e advi_${c}.csv ]; then
+        echo "Running advi_${c}.csv"
+        ./$PROBLEM variational $DATA_ARG output file=advi_${c}.csv > /dev/null
+    else
+        echo "Skipping advi_${c}.csv"
     fi
 done
 
@@ -41,8 +47,11 @@ $CMDSTAN/bin/stansummary nuts*.csv > nuts_stats.txt
 # RUN OURS (ISVI), FOR EACH VALUE OF LAMBDA
 for l in ${LAMBDAS[@]}; do
     for c in ${CHAINS[@]}; do
-        if [ ! -f isvi_${l}_${c}.csv ]; then
+        if [ ! -e isvi_${l}_${c}.csv ]; then
+            echo "Running isvi_${l}_${c}.csv"
             ./$PROBLEM isvi lambda=${l} $ISVI_ARGS $DATA_ARG output file=isvi_${l}_${c}.csv refresh=${REFRESH}
+        else
+            echo "Skipping isvi_${l}_${c}.csv"
         fi
     done
 
