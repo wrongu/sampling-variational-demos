@@ -79,6 +79,7 @@ lambdas = [l.strip() for l in args.lambdas.split(',')]
 
 stan_model = load_stan_model(args.problem)
 print("Loaded", args.problem, "with (constrained) parameters:", *stan_model.constrained_param_names)
+print("Dim of unconstrained space:", unconstrained_dim(stan_model))
 
 # dimensionality of the unconstrained space
 dim = unconstrained_dim(stan_model)
