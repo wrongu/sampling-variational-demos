@@ -100,9 +100,12 @@ isvi_dict = {
 print("done.")
 
 # Shuffle samples to destroy autocorrelations
+print("Shuffling...", end=" ")
 nuts_samples = nuts_samples[np.random.permutation(len(nuts_samples))]
 isvi_dict = {l: df.sample(frac=1.) for l, df in isvi_dict.items()}
+print("done.")
 
+print("Initializing fs and allocating space for results...", end=" ")
 # frequencies of sinusoids, in units of cycles-per-x where x is the units of the unconstrained parameter space
 freqs = torch.arange(args.freq_min, args.freq_max+1, device=args.device).float()
 # Which alphas to experiment with
@@ -116,6 +119,7 @@ advi_ev = torch.zeros((args.num_fs, len(alphas), len(runs)), device=args.device)
 isvi_ev = torch.zeros((args.num_fs, len(alphas), args.num_subs, len(lambdas)), device=args.device)
 t_history = torch.zeros((args.num_fs, len(freqs), dim), device=args.device)
 phase_history = torch.zeros((args.num_fs, len(freqs)), device=args.device)
+print("done.")
 
 # Subselect and unconstrain NUTS samples
 print("Unconstraining NUTS samples...", end=" ")
