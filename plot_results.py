@@ -129,7 +129,7 @@ if __name__ == '__main__':
     parser.add_argument("--lam", default="2.0", type=str)
     parser.add_argument("--chain", default=1, type=int, choices=[1,2,3,4])
     parser.add_argument("--display", action='store_true')
-    parser.add_argument("--type", choices=['grid', 'traces'])
+    parser.add_argument("--type", default='grid', choices=['grid', 'traces'])
     args = parser.parse_args()
 
     # throw an error if args.lam does not parse as a float greater than or equal to 1.0
